@@ -1,10 +1,12 @@
-package ru.spbau.gorokhov.ats.utils;
+package ru.spbau.gorokhov.ats.model;
 
+import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import lombok.ToString;
 
 import java.io.Serializable;
 
+@Getter
 @ToString
 @RequiredArgsConstructor
 public class TimeInfo implements Serializable {

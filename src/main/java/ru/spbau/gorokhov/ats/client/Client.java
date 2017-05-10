@@ -4,15 +4,13 @@ import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import ru.spbau.gorokhov.ats.client.utils.Clock;
+import ru.spbau.gorokhov.ats.utils.ClientAddress;
 import ru.spbau.gorokhov.ats.utils.ClientRequest;
 import ru.spbau.gorokhov.ats.utils.ServerRequest;
+import ru.spbau.gorokhov.ats.utils.TimeInfo;
 
-import java.io.DataInputStream;
-import java.io.DataOutputStream;
-import java.io.IOException;
-import java.net.ServerSocket;
-import java.net.Socket;
-import java.net.UnknownHostException;
+import java.io.*;
+import java.net.*;
 import java.util.*;
 
 public class Client {
@@ -20,43 +18,60 @@ public class Client {
 
     private static final String DEFAULT_SERVER_HOSTNAME = "localhost";
     private static final int DEFAULT_SERVER_PORT = 8080;
-    private static final int DEFAULT_PORT = 12345;
+    private static final int DEFAULT_LOCAL_PORT = 62222;
 
     private final String serverHostname;
     private final int serverPort;
-    private final int port;
+    private final int localPort;
+
+    private final InetAddress localAddress;
+    private final InetAddress serverAddress;
 
     private final Clock clock;
 
     private static final int SEND_DELAY = 1000;
 
-    private static final double RELATIVE_SKEW_TUNE = 0.6;
-    private static final double SKEW_TUNE = 0.6;
-    private static final double OFFSET_ERROR_TUNE = 0.6;
+    private static final double RELATIVE_SKEW_TUNE = 0.75;
+    private static final double SKEW_TUNE = 0.75;
+    private static final double OFFSET_ERROR_TUNE = 0.75;
 
-    private final Map<String, Double> relativeSkew = new HashMap<>();
-    private final Map<String, Long> lastClientTime = new HashMap<>();
-    private final Map<String, Long> lastLocalTime = new HashMap<>();
+    private final Map<ClientAddress, Double> relativeSkew = new TreeMap<>();
+    private final Map<ClientAddress, Long> lastClientTime = new TreeMap<>();
+    private final Map<ClientAddress, Long> lastLocalTime = new TreeMap<>();
 
     // relative to virtual clock skew estimate
     private double skew = 1;
     private double offsetError = 0;
 
-    private final List<String> neighbourIps = new ArrayList<>();
+    private final List<ClientAddress> neighbours = new ArrayList<>();
 
     private boolean running = false;
 
-
-    public Client(String serverHostname, int serverPort, int port) {
+    public Client(String serverHostname, int serverPort, int localPort) throws UnknownHostException {
         this.serverHostname = serverHostname;
         this.serverPort = serverPort;
-        this.port = port;
+        this.localPort = localPort;
+
+        this.localAddress = Inet4Address.getLocalHost();
+        this.serverAddress = InetAddress.getByName(serverHostname);
 
         clock = new Clock();
     }
 
-    public Client() {
-        this(DEFAULT_SERVER_HOSTNAME, DEFAULT_SERVER_PORT, DEFAULT_PORT);
+    public Client(String serverHostname, int localPort) throws UnknownHostException {
+        this(serverHostname, DEFAULT_SERVER_PORT, localPort);
+    }
+
+    public Client(int localPort) throws UnknownHostException {
+        this(DEFAULT_SERVER_HOSTNAME, localPort);
+    }
+
+    public Client(String serverHostname) throws UnknownHostException {
+        this(serverHostname, DEFAULT_LOCAL_PORT);
+    }
+
+    public Client() throws UnknownHostException {
+        this(DEFAULT_LOCAL_PORT);
     }
 
     public void connect() throws IOException {
@@ -64,10 +79,10 @@ public class Client {
 
         register();
 
-        getNeighbours();
+        LOG.info("Connected to server.");
 
         new Thread(() -> {
-            try (ServerSocket serverSocket = new ServerSocket(port)) {
+            try (ServerSocket serverSocket = new ServerSocket(localPort)) {
                 while (running) {
                     Socket newConnection = serverSocket.accept();
                     new Thread(new RequestHandler(newConnection)).start();
@@ -80,7 +95,7 @@ public class Client {
 
         new Thread(() -> {
             while (running) {
-                sendData();
+                new Thread(Client.this::sendData).start();
 
                 try {
                     Thread.sleep(SEND_DELAY);
@@ -93,70 +108,69 @@ public class Client {
     }
 
     private void register() {
-        try (Socket serverSocket = new Socket(serverHostname, serverPort);
+        try (Socket serverSocket = new Socket(serverAddress, serverPort, localAddress, localPort);
              DataOutputStream serverInput = new DataOutputStream(serverSocket.getOutputStream())) {
 
             serverInput.writeInt(ServerRequest.REGISTER);
         } catch (UnknownHostException e) {
             // TODO
-            LOG.error("hz");
+            LOG.error("hz345");
         } catch (IOException e) {
             // TODO
-            LOG.error("hz1");
+            LOG.error("hz1235");
+            e.printStackTrace();
         }
     }
 
-    private void getNeighbours() {
-        try (Socket serverSocket = new Socket(serverHostname, serverPort);
-            DataInputStream serverOutput = new DataInputStream(serverSocket.getInputStream());
-            DataOutputStream serverInput = new DataOutputStream(serverSocket.getOutputStream())) {
-
-            serverInput.writeInt(ServerRequest.UPDATE_NEIGHBOURS);
-
-            int neighboursCount = serverOutput.readInt();
-
-            synchronized (neighbourIps) {
-                neighbourIps.clear();
-                while (neighboursCount-- > 0) {
-                    String neighbourIp = serverOutput.readUTF();
-
-                    neighbourIps.add(neighbourIp);
-                    if (!relativeSkew.containsKey(neighbourIp)) {
-                        relativeSkew.put(neighbourIp, 1D);
-                        lastClientTime.put(neighbourIp, 0L);
-                        lastLocalTime.put(neighbourIp, 0L);
-                    }
-                }
-            }
-        } catch (UnknownHostException e) {
-            // TODO
-            LOG.error("hz");
-        } catch (IOException e) {
-            // TODO
-            LOG.error("hz1");
-        }
-    }
+    private int ptr = -1;
 
     private void sendData() {
+        if (neighbours.size() == 0) {
+            return;
+        }
+
         Random random = new Random(System.currentTimeMillis());
 
-        synchronized (this) {
-            String targetIp = neighbourIps.get(random.nextInt(neighbourIps.size()));
+        if (ptr == -1) {
+            ptr = random.nextInt(neighbours.size());
+        }
 
-            try (Socket socket = new Socket(targetIp, port);
+        synchronized (this) {
+//            ClientAddress neighbour = neighbours.get(random.nextInt(neighbours.size()));
+            ClientAddress neighbour = neighbours.get(ptr);
+
+            ptr = (ptr + 1) % neighbours.size();
+
+            try (Socket socket = new Socket(neighbour.getLocalIp(), neighbour.getPort());
                 DataOutputStream outputStream = new DataOutputStream(socket.getOutputStream())) {
 
                 outputStream.writeInt(ClientRequest.SEND_DATA);
 
+                outputStream.writeInt(localPort);
+
                 outputStream.writeLong(clock.getTime());
                 outputStream.writeDouble(skew);
                 outputStream.writeDouble(offsetError);
+
+                outputStream.flush();
+
+                socket.setSoLinger(true, 10);
+
+                // not to allow socket closing before client reads all the infotmation
+                // (otherwise it happens all the time causing terrible mistake and not system working)
+                // maybe this is only on my machine
+                try {
+                    Thread.sleep(500);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
             } catch (UnknownHostException e) {
                 // TODO
-                LOG.error("hz");
+                LOG.error("hz534534");
             } catch (IOException e) {
                 // TODO
-                LOG.error("hz1");
+                LOG.error("hz15435");
+                e.printStackTrace();
             }
         }
     }
@@ -182,21 +196,28 @@ public class Client {
             String clientIp = clientSocket.getInetAddress().getHostAddress();
 
             try (DataInputStream clientOutput = new DataInputStream(clientSocket.getInputStream());
-                 DataOutputStream clientInput = new DataOutputStream(clientSocket.getOutputStream())) {
+                 ObjectOutputStream clientInput = new ObjectOutputStream(clientSocket.getOutputStream())) {
+
                 int requestId = clientOutput.readInt();
 
                 switch (requestId) {
                     case ClientRequest.SEND_DATA:
+                        int clientPort = clientOutput.readInt();
+
+                        ClientAddress clientAddress = new ClientAddress(clientIp, clientPort);
+
                         long clientTime = clientOutput.readLong();
                         long localTime = clock.getTime();
 
                         double clientSkew = clientOutput.readDouble();
                         double clientOffsetError = clientOutput.readDouble();
 
+                        LOG.info("{} got from {}: time={}, skew={}, offset={}", localPort, clientPort, clientTime, clientSkew, clientOffsetError);
+
                         synchronized (Client.this) {
-                            long prevClientTime = lastClientTime.get(clientIp);
-                            long prevLocalTime = lastLocalTime.get(clientIp);
-                            double currentRelativeSkew = relativeSkew.get(clientIp);
+                            long prevClientTime = lastClientTime.get(clientAddress);
+                            long prevLocalTime = lastLocalTime.get(clientAddress);
+                            double currentRelativeSkew = relativeSkew.get(clientAddress);
 
                             double newRelativeSkew = RELATIVE_SKEW_TUNE * currentRelativeSkew + (1 - RELATIVE_SKEW_TUNE) * (clientTime - prevClientTime) / (localTime - prevLocalTime);
 
@@ -204,14 +225,60 @@ public class Client {
 
                             offsetError = OFFSET_ERROR_TUNE * offsetError + (1 - OFFSET_ERROR_TUNE) * (clientSkew * clientTime + clientOffsetError - skew * localTime - offsetError);
 
-                            relativeSkew.put(clientIp, newRelativeSkew);
-                            lastClientTime.put(clientIp, clientTime);
-                            lastLocalTime.put(clientIp, localTime);
+                            relativeSkew.put(clientAddress, newRelativeSkew);
+                            lastClientTime.put(clientAddress, clientTime);
+                            lastLocalTime.put(clientAddress, localTime);
                         }
+
+                        break;
+
+
+                    case ServerRequest.GET_TIME:
+                        TimeInfo timeInfo;
+                        synchronized (Client.this) {
+                            timeInfo = new TimeInfo(clock.getSkew() * skew, skew * clock.getOffset() + offsetError);
+                        }
+                        clientInput.writeObject(timeInfo);
+
+                        break;
+
+
+                    case ServerRequest.UPDATE_NEIGHBOURS:
+                        List<ClientAddress> newNeighbours = new ArrayList<>();
+
+                        int count = clientOutput.readInt();
+
+                        while (count --> 0) {
+                            String ip = clientOutput.readUTF();
+                            int port = clientOutput.readInt();
+                            newNeighbours.add(new ClientAddress(ip, port));
+                        }
+
+                        LOG.info("Got new neighbours: {}", newNeighbours);
+
+                        synchronized (Client.this) {
+                            for (ClientAddress neighbourAddress : newNeighbours) {
+                                if (!neighbours.contains(neighbourAddress)) {
+                                    neighbours.add(neighbourAddress);
+                                    relativeSkew.put(neighbourAddress, 1D);
+                                    lastLocalTime.put(neighbourAddress, 0L);
+                                    lastClientTime.put(neighbourAddress, 0L);
+                                }
+                            }
+
+                            // TODO handle removed neighbours maybe
+                        }
+
+                        break;
+
+
+                    default:
+                        LOG.info("Invalid request id: {}", requestId);
                 }
             } catch (IOException e) {
                 // TODO
                 LOG.error("bad");
+                e.printStackTrace();
             }
         }
     }

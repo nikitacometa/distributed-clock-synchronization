@@ -1,5 +1,8 @@
 package ru.spbau.gorokhov.ats.client.utils;
 
+import lombok.Getter;
+
+@Getter
 public class Clock {
     private static final long MAX_SKEW_DEVIATION = 1000 * 60 * 60;
     private static final long MAX_OFFSET_DEVIATION = 1000 * 60 * 60;

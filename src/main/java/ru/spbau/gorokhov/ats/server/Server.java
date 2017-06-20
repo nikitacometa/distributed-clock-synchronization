@@ -3,6 +3,7 @@ package ru.spbau.gorokhov.ats.server;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import ru.spbau.gorokhov.ats.client.utils.Clock;
 import ru.spbau.gorokhov.ats.model.ClientAddress;
 import ru.spbau.gorokhov.ats.model.Request;
 import ru.spbau.gorokhov.ats.model.TimeInfo;
@@ -30,6 +31,8 @@ public class Server {
 
     private boolean running = false;
 
+    private long startTime = Clock.getRealTime();
+
     public Server(int port) {
         this.port = port;
     }
@@ -56,20 +59,20 @@ public class Server {
             }
         }).start();
 
-        new Thread(() -> {
-            while (running) {
-                Sleepyhead.sleep(SHOW_TIME_DELAY);
-
-                showTime();
-            }
-        }).start();
+//        while (running) {
+//            Sleepyhead.sleep(SHOW_TIME_DELAY);
+//
+//            showTime();
+//        }
     }
 
     private static final SimpleDateFormat DATE_FORMAT = new SimpleDateFormat("yyyy.MM.dd HH:mm:ss");
 
     private void showTime() {
-        System.out.println("Clients:");
-        clientTimes.forEach((address, timeInfo) -> System.out.println(address + ": " + DATE_FORMAT.format(new Date(timeInfo.getTime()))));
+        System.out.println("Working for " + (Clock.getRealTime() - startTime) + "ms. Clients:");
+        synchronized (clientTimes) {
+            clientTimes.forEach((address, timeInfo) -> System.out.println(address + ": " + DATE_FORMAT.format(new Date(timeInfo.getTime()))));
+        }
     }
 
     private List<ClientAddress> getNeighbours(ClientAddress clientAddress) {
@@ -95,14 +98,14 @@ public class Server {
 
                 int requestId = clientOutput.readInt();
 
-                LOG.info("{} request from {}", Request.toString(requestId), clientAddress);
+//                LOG.info("{} request from {}", Request.toString(requestId), clientAddress);
 
                 switch (requestId) {
                     case Request.REGISTER:
                         synchronized (clients) {
                             clients.add(clientAddress);
                         }
-                        LOG.info("Client {} was registered.", clientAddress);
+//                        LOG.info("Client {} was registered.", clientAddress);
                         break;
 
                     case Request.SEND_TIME:
@@ -110,7 +113,7 @@ public class Server {
                         double clientOffset = clientOutput.readDouble();
                         TimeInfo timeInfo = new TimeInfo(clientSkew, clientOffset);
 
-                        LOG.info("Got time info from {}: {}", clientAddress, timeInfo);
+//                        LOG.info("Got time info from {}: {}", clientAddress, timeInfo);
 
                         synchronized (clientTimes) {
                             clientTimes.put(clientAddress, timeInfo);
@@ -126,7 +129,7 @@ public class Server {
                                 clientInput.writeInt(neighbour.getPort());
                             }
 
-                            LOG.info("Neighbours were sent to {}: {}", clientAddress, neighbours);
+//                            LOG.info("Neighbours were sent to {}: {}", clientAddress, neighbours);
                         } catch (IOException e) {
                             LOG.error("Failed to send neighbours.", e);
                         }

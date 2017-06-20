@@ -29,17 +29,18 @@ public class Client {
 
     private final Clock clock;
 
-    private static final long UPDATE_DELAY = 4000;
-    private static final long SEND_DATA_DELAY = 1000;
+    private static final long SEND_TIME_DELAY = 1000;
+    private static final long SEND_DATA_DELAY = 200;
+    private static final long UPDATE_NEIGHBOURS_DELAY = 2000;
 
     private static final long PACKET_DELIVERY_DELAY = 1;
 
-    private static final long STAGE_TIME = 50000;
+    private static final long STAGE_TIME = 2000;
     private long startTime;
 
-    private static final double RELATIVE_SKEW_TUNE = 0.6;
-    private static final double SKEW_TUNE = 0.6;
-    private static final double OFFSET_ERROR_TUNE = 0.6;
+    private static final double RELATIVE_SKEW_TUNE = 0.5;
+    private static final double SKEW_TUNE = 0.5;
+    private static final double OFFSET_ERROR_TUNE = 0.5;
 
     private final Map<ClientAddress, Double> relativeSkew = new TreeMap<>();
     private final Map<ClientAddress, Long> lastClientTime = new TreeMap<>();
@@ -120,29 +121,53 @@ public class Client {
             }
         }).start();
 
+        long prevSendData = Clock.getRealTime(), prevSendTime = Clock.getRealTime(), prevUpdateNeighbours = Clock.getRealTime();
+
+        while (running) {
+            long currentTime = Clock.getRealTime();
+
+            if (currentTime - prevSendData > SEND_DATA_DELAY) {
+                prevSendData = currentTime;
+                sendDataToAll();
+            }
+
+            if (currentTime - prevSendTime > SEND_TIME_DELAY) {
+                prevSendTime = currentTime;
+                sendTime();
+            }
+
+            if (currentTime - prevUpdateNeighbours > UPDATE_NEIGHBOURS_DELAY) {
+                prevUpdateNeighbours = currentTime;
+                updateNeighbours();
+            }
+        }
+        /*
         new Thread(() -> {
             Sleepyhead.sleep(3000);
 
             while (running) {
                 Sleepyhead.sleep(SEND_DATA_DELAY);
 
-                sendData();
+                sendDataToAll();
             }
         }).start();
 
         new Thread(() -> {
             while (running) {
-                Sleepyhead.sleep(UPDATE_DELAY);
-
-                updateNeighbours();
-
-                Sleepyhead.sleep(UPDATE_DELAY);
+                Sleepyhead.sleep(SEND_TIME_DELAY);
 
                 sendTime();
-
-                showDebugInfo();
             }
         }).start();
+
+        new Thread(() -> {
+            while (running) {
+                Sleepyhead.sleep(UPDATE_NEIGHBOURS_DELAY);
+
+                updateNeighbours();
+            }
+        }).start();
+        */
     }
 
     private static final SimpleDateFormat DATE_FORMAT = new SimpleDateFormat("yyyy.MM.dd HH:mm:ss");
@@ -161,19 +186,19 @@ public class Client {
             relativeSkew.put(clientAddress, 1D);
         }
 
-        long workTime = Clock.getRealTime() - startTime;
+        long currentStage = (Clock.getRealTime() - startTime) / STAGE_TIME % 3;
 
         double currentRelativeSkew = relativeSkew.get(clientAddress);
 
-        if (workTime < STAGE_TIME && lastLocalTime.containsKey(clientAddress)) {
+        if (/*currentStage == 0 &&*/ lastLocalTime.containsKey(clientAddress)) {
             long prevClientTime = lastClientTime.get(clientAddress);
             long prevLocalTime = lastLocalTime.get(clientAddress);
 
             double newRelativeSkew = RELATIVE_SKEW_TUNE * currentRelativeSkew + (1 - RELATIVE_SKEW_TUNE) * (clientTime - prevClientTime) / (localTime - prevLocalTime);
             relativeSkew.put(clientAddress, newRelativeSkew);
-        } else if (workTime > STAGE_TIME && workTime < 2 * STAGE_TIME) {
+        } else /*if (currentStage == 1)*/ {
             skew = SKEW_TUNE * skew + (1 - SKEW_TUNE) * currentRelativeSkew * clientSkew;
-        } else if (workTime > 2 * STAGE_TIME){
+//        } else if (currentStage == 2){
             offsetError = offsetError + (1 - OFFSET_ERROR_TUNE) * (clientSkew * clientTime + clientOffsetError - skew * localTime - offsetError);
         }
 
@@ -226,7 +251,7 @@ public class Client {
             }
 
             // TODO: handle removed neighbours
-            LOG.info("Got new neighbours: {}", newNeighbours);
+//            LOG.info("Got new neighbours: {}", newNeighbours);
         } catch (IOException e) {
             LOG.error("Failed to update neighbours.", e);
         }
@@ -241,11 +266,12 @@ public class Client {
             serverInput.writeInt(Request.SEND_TIME);
 
             TimeInfo timeInfo = new TimeInfo(skew * clock.getSkew(), skew * clock.getOffset() + offsetError);
+            System.out.println(DATE_FORMAT.format(new Date(timeInfo.getTime())));
 
             serverInput.writeDouble(timeInfo.getSkew());
             serverInput.writeDouble(timeInfo.getOffset());
 
-            LOG.info("Time info was sent: {}", timeInfo);
+//            LOG.info("Time info was sent: {}", timeInfo);
         } catch (IOException e) {
             LOG.error("Failed to send time info.", e);
         }
@@ -263,13 +289,13 @@ public class Client {
         }
     }
 
-    private void sendData() {
-        if (neighbours.size() == 0) {
-            return;
+    private void sendDataToAll() {
+        for (ClientAddress neighbour : neighbours) {
+            sendData(neighbour);
         }
+    }
 
-        ClientAddress neighbour = chooseNeighbour();
-
+    private void sendData(ClientAddress neighbour) {
         try (DatagramSocket socket = new DatagramSocket()) {
             SyncInfo syncInfo;
 
@@ -281,7 +307,7 @@ public class Client {
             DatagramPacket packet = new DatagramPacket(data, data.length, InetAddress.getByName(neighbour.getIp()), neighbour.getPort());
             socket.send(packet);
 
-            LOG.info("Sync info was sent to {}: {}", neighbour, syncInfo);
+//            LOG.info("Sync info was sent to {}: {}", neighbour, syncInfo);
         } catch (IOException e) {
             LOG.error("Failed to send sync info to {}.", neighbour, e);
         }

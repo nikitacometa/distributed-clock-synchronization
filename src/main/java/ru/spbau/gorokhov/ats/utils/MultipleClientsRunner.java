@@ -9,19 +9,14 @@ public class MultipleClientsRunner {
     public static void main(String[] args) throws IOException {
         String serverHostname = InetAddress.getLocalHost().getHostName();
 
-        new Client(serverHostname).connect();
-        new Client(serverHostname).connect();
+        int numberOfClients = 1;
 
-        new Client(serverHostname).connect();
-        new Client(serverHostname).connect();
-
-        new Client(serverHostname).connect();
-        new Client(serverHostname).connect();
-
-        new Client(serverHostname).connect();
-        new Client(serverHostname).connect();
-
-        new Client(serverHostname).connect();
-        new Client(serverHostname).connect();
+        while (numberOfClients --> 0) {
+            new Thread(() -> {
+                try {
+                    new Client(serverHostname).connect();
+                } catch (IOException ignored) {}
+            }).start();
+        }
     }
 }

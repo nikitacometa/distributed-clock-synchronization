@@ -9,7 +9,7 @@ public class MultipleClientsRunner {
     public static void main(String[] args) throws IOException {
         String serverHostname = InetAddress.getLocalHost().getHostName();
 
-        int numberOfClients = 7;
+        int numberOfClients = 13;
 
         while (numberOfClients --> 0) {
             new Thread(() -> {

@@ -27,7 +27,7 @@ public class Client {
     private final Clock clock;
 
     private static final long UPDATE_TIME_DELAY = 1000;
-    private static final long SEND_DATA_DELAY = 20000;
+    private static final long SEND_DATA_DELAY = 500;
     private static final long UPDATE_NEIGHBOURS_DELAY = 2000;
 
     private static final double RELATIVE_SKEW_TUNE = 0.6;
@@ -152,7 +152,7 @@ public class Client {
             relativeSkew.put(clientAddress, 1D);
         }
 
-//        if (Clock.getRealTime() - startWork < 15000) {
+        if (Clock.getRealTime() - startWork < 15000) {
             double currentRelativeSkew = relativeSkew.get(clientAddress);
 
             if (lastLocalTime.containsKey(clientAddress)) {
@@ -165,7 +165,7 @@ public class Client {
             }
 
             skew = SKEW_TUNE * skew + (1 - SKEW_TUNE) * currentRelativeSkew * clientSkew;
-//        }
+        }
 
         offsetError = offsetError + (1 - OFFSET_ERROR_TUNE) * (clientSkew * clientTime + clientOffsetError - skew * localTime - offsetError);
 

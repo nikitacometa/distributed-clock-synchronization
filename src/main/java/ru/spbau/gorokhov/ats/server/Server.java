@@ -76,24 +76,21 @@ public class Server {
     }
 
     private int getNumberOfOneClientNeighbours() {
-        return clients.size() / 2;
+        return Math.min(clients.size(), 6);
     }
 
     private List<ClientAddress> getNeighbours(ClientAddress clientAddress) {
         return clientNeighbours.get(clientAddress);
     }
 
-    private synchronized void updateNeighbours(ClientAddress clientAddress) {
+    private synchronized void updateNeighbours(ClientAddress newClientAddress) {
         List<ClientAddress> neighbours = clients.stream()
-                .filter(client -> RandomUtils.nextBoolean())
+                .sorted(Comparator.comparingInt(client -> clientNeighbours.get(client).size()).reversed())
+                .limit(getNumberOfOneClientNeighbours())
                 .collect(Collectors.toList());
-        clientNeighbours.put(clientAddress, neighbours);
-
-        clients.stream()
-                .filter(c -> RandomUtils.nextBoolean())
-                .forEach(client -> clientNeighbours.get(client).add(clientAddress));
-
-        clients.add(clientAddress);
+        neighbours.forEach(neighbour -> clientNeighbours.get(neighbour).add(newClientAddress));
+        clientNeighbours.put(newClientAddress, neighbours);
+        clients.add(newClientAddress);
     }
 
     @RequiredArgsConstructor

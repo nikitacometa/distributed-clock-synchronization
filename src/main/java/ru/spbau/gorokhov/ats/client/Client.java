@@ -27,7 +27,7 @@ public class Client {
     private final Clock clock;
 
     private static final long UPDATE_TIME_DELAY = 1000;
-    private static final long SEND_DATA_DELAY = 500;
+    private static final long SEND_DATA_DELAY = 20000;
     private static final long UPDATE_NEIGHBOURS_DELAY = 2000;
 
     private static final double RELATIVE_SKEW_TUNE = 0.6;
@@ -41,6 +41,8 @@ public class Client {
     private double skew = 1;
     private double offsetError = 0;
     private double debugOffset = 0;
+
+    private long startWork;
 
     private volatile Map<ClientAddress, TimeInfo> clientTimes = new TreeMap<>();
 
@@ -75,6 +77,8 @@ public class Client {
                 } catch (IOException e) {
                     LOG.error("Failed to connect to the server.", e);
                 }
+
+                startWork = Clock.getRealTime();
 
                 sendTime();
 
@@ -118,7 +122,7 @@ public class Client {
 
         new Thread(() -> {
             while (running) {
-                Sleepyhead.sleep(SEND_DATA_DELAY);
+                Sleepyhead.sleep((long) (SEND_DATA_DELAY / clock.getSkew()));
 
                 sendDataToAll();
             }
@@ -148,18 +152,21 @@ public class Client {
             relativeSkew.put(clientAddress, 1D);
         }
 
-        double currentRelativeSkew = relativeSkew.get(clientAddress);
+//        if (Clock.getRealTime() - startWork < 15000) {
+            double currentRelativeSkew = relativeSkew.get(clientAddress);
 
-        if (lastLocalTime.containsKey(clientAddress)) {
-            long prevClientTime = lastClientTime.get(clientAddress);
-            long prevLocalTime = lastLocalTime.get(clientAddress);
+            if (lastLocalTime.containsKey(clientAddress)) {
+                long prevClientTime = lastClientTime.get(clientAddress);
+                long prevLocalTime = lastLocalTime.get(clientAddress);
 
-            currentRelativeSkew = RELATIVE_SKEW_TUNE * currentRelativeSkew + (1 - RELATIVE_SKEW_TUNE) * (clientTime - prevClientTime) / (localTime - prevLocalTime);
+                currentRelativeSkew = RELATIVE_SKEW_TUNE * currentRelativeSkew + (1 - RELATIVE_SKEW_TUNE) * (clientTime - prevClientTime) / (localTime - prevLocalTime);
 
-            relativeSkew.put(clientAddress, currentRelativeSkew);
-        }
+                relativeSkew.put(clientAddress, currentRelativeSkew);
+            }
 
-        skew = SKEW_TUNE * skew + (1 - SKEW_TUNE) * currentRelativeSkew * clientSkew;
+            skew = SKEW_TUNE * skew + (1 - SKEW_TUNE) * currentRelativeSkew * clientSkew;
+//        }
+
         offsetError = offsetError + (1 - OFFSET_ERROR_TUNE) * (clientSkew * clientTime + clientOffsetError - skew * localTime - offsetError);
 
         lastClientTime.put(clientAddress, clientTime);
@@ -213,7 +220,7 @@ public class Client {
     }
 
     private void sendTime() {
-//        LOG.info("Sending time info to server..."); \u000a offsetError = debugOffset;
+//        LOG.info("Sending time info to server..."); offsetError = debugOffset;
         try (Socket socket = new Socket(serverHostname, serverPort);
              DataOutputStream serverInput = new DataOutputStream(socket.getOutputStream())) {
 
@@ -221,7 +228,7 @@ public class Client {
 
             serverInput.writeInt(Request.SEND_TIME);
 
-            TimeInfo timeInfo = new TimeInfo(clock.getSkew(), clock.getOffset() + offsetError);
+            TimeInfo timeInfo = getEstimateTime();
 
             serverInput.writeDouble(timeInfo.getSkew());
             serverInput.writeDouble(timeInfo.getOffset());
@@ -275,7 +282,7 @@ public class Client {
         try (DatagramSocket socket = new DatagramSocket()) {
             SyncInfo syncInfo;
 
-//            LOG.info("Sending data to {}.", neighbour); \u000a offsetError = debugOffset;
+//            LOG.info("Sending data to {}.", neighbour); offsetError = debugOffset;
 
             synchronized (this) {
                 syncInfo = new SyncInfo(localPort, clock.getTime(), skew, offsetError);
@@ -301,7 +308,7 @@ public class Client {
     }
 
     public TimeInfo getEstimateTime() {
-        return new TimeInfo(clock.getSkew(), clock.getOffset() + debugOffset);
+        return new TimeInfo(clock.getSkew() * skew, skew * clock.getOffset() + offsetError);
     }
 
     public TimeInfo getRealTime() {

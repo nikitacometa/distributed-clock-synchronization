@@ -73,12 +73,12 @@ public class ClientApp extends Application {
 
         TableColumn<ClientInfo, String> clientAddressColumn = new TableColumn<>("Client");
         clientAddressColumn.setCellValueFactory(new PropertyValueFactory<>("clientAddress"));
-        clientAddressColumn.setPrefWidth(100);
+        clientAddressColumn.setPrefWidth(150);
 
 
         TableColumn<ClientInfo, String> clientTimeColumn = new TableColumn<>("Time");
         clientTimeColumn.setCellValueFactory(new PropertyValueFactory<>("estimateTime"));
-        clientTimeColumn.setPrefWidth(100);
+        clientTimeColumn.setPrefWidth(150);
 
         clientsTable.getColumns().addAll(clientAddressColumn, clientTimeColumn);
 

@@ -17,4 +17,8 @@ public class RandomUtils {
     public static boolean nextBoolean() {
         return RANDOM.nextBoolean();
     }
+
+    public static boolean trueWithProbability(double probability) {
+        return RANDOM.nextDouble() < probability;
+    }
 }

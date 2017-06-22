@@ -4,8 +4,8 @@ import lombok.Getter;
 
 @Getter
 public class Clock {
-    private static final long MAX_SKEW_DEVIATION = 1000 * 60 * 60 * 24; // one day
-    private static final long MAX_OFFSET_DEVIATION = 1000 * 60 * 60 * 24;
+    private static final long MAX_SKEW_DEVIATION = (long) 1000 * 60 * 60 * 24; // one year
+    private static final long MAX_OFFSET_DEVIATION = (long) 1000 * 60 * 60 * 24;
 
     private final double skew;
     private final double offset;
@@ -13,8 +13,8 @@ public class Clock {
     public Clock() {
         long realTime = getRealTime();
 
-        long alphaDeviation = RandomUtils.nextLong(-MAX_SKEW_DEVIATION, MAX_SKEW_DEVIATION);
-        skew = (realTime + alphaDeviation) * 1D / realTime;
+        long skewDeviation = RandomUtils.nextLong(-MAX_SKEW_DEVIATION, MAX_SKEW_DEVIATION);
+        skew = (realTime + skewDeviation) * 1D / realTime;
 
         offset = RandomUtils.nextLong(-MAX_OFFSET_DEVIATION, MAX_OFFSET_DEVIATION);
     }

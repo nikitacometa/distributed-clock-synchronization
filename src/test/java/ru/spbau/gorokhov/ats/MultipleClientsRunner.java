@@ -1,4 +1,4 @@
-package ru.spbau.gorokhov.ats.utils;
+package ru.spbau.gorokhov.ats;
 
 import ru.spbau.gorokhov.ats.client.Client;
 
@@ -9,7 +9,7 @@ public class MultipleClientsRunner {
     public static void main(String[] args) throws IOException {
         String serverHostname = InetAddress.getLocalHost().getHostName();
 
-        int numberOfClients = 1;
+        int numberOfClients = 10;
 
         while (numberOfClients --> 0) {
             new Thread(() -> {

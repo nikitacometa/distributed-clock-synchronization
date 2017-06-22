@@ -12,14 +12,11 @@ import ru.spbau.gorokhov.ats.utils.Sleepyhead;
 
 import java.io.*;
 import java.net.*;
-import java.text.SimpleDateFormat;
 import java.util.*;
 
 public class Client {
     private static int id = 1;
     private Logger LOG = LoggerFactory.getLogger(String.format("Client-%d", id++));
-
-    private static final Random RANDOM = new Random(System.currentTimeMillis());
 
     private static final int DEFAULT_SERVER_PORT = 8080;
 
@@ -29,18 +26,13 @@ public class Client {
 
     private final Clock clock;
 
-    private static final long SEND_TIME_DELAY = 1000;
-    private static final long SEND_DATA_DELAY = 200;
+    private static final long UPDATE_TIME_DELAY = 1000;
+    private static final long SEND_DATA_DELAY = 500;
     private static final long UPDATE_NEIGHBOURS_DELAY = 2000;
 
-    private static final long PACKET_DELIVERY_DELAY = 1;
-
-    private static final long STAGE_TIME = 2000;
-    private long startTime;
-
-    private static final double RELATIVE_SKEW_TUNE = 0.5;
-    private static final double SKEW_TUNE = 0.5;
-    private static final double OFFSET_ERROR_TUNE = 0.5;
+    private static final double RELATIVE_SKEW_TUNE = 0.6;
+    private static final double SKEW_TUNE = 0.6;
+    private static final double OFFSET_ERROR_TUNE = 0.6;
 
     private final Map<ClientAddress, Double> relativeSkew = new TreeMap<>();
     private final Map<ClientAddress, Long> lastClientTime = new TreeMap<>();
@@ -48,6 +40,9 @@ public class Client {
 
     private double skew = 1;
     private double offsetError = 0;
+    private double debugOffset = 0;
+
+    private volatile Map<ClientAddress, TimeInfo> clientTimes = new TreeMap<>();
 
     private final List<ClientAddress> neighbours = new ArrayList<>();
 
@@ -87,8 +82,6 @@ public class Client {
 
                 byte[] data = new byte[128];
 
-                startTime = Clock.getRealTime();
-
                 while (running) {
                     DatagramPacket packet = new DatagramPacket(data, data.length);
 
@@ -99,12 +92,14 @@ public class Client {
                         continue;
                     }
 
-                    long localTime = clock.getTime() - PACKET_DELIVERY_DELAY;
+                    long localTime = clock.getTime();
 
                     SyncInfo syncInfo;
 
                     try {
                         syncInfo = Serializer.deserialize(packet.getData(), SyncInfo.class);
+
+                        debugOffset = debugOffset + (1 - OFFSET_ERROR_TUNE) * (syncInfo.getTime() + syncInfo.getOffset() - localTime - debugOffset);
                     } catch (IOException | ClassNotFoundException e) {
                         LOG.error("Failed to deserialize sync info.", e);
                         continue;
@@ -112,7 +107,7 @@ public class Client {
 
                     ClientAddress clientAddress = new ClientAddress(packet.getAddress().getHostAddress(), syncInfo.getPort());
 
-                    LOG.info("Got sync info from {}: {}", clientAddress, syncInfo);
+//                    LOG.info("Got sync info from {}: {}", clientAddress, syncInfo);
 
                     process(clientAddress, syncInfo.getTime(), syncInfo.getSkew(), syncInfo.getOffset(), localTime);
                 }
@@ -121,30 +116,7 @@ public class Client {
             }
         }).start();
 
-        long prevSendData = Clock.getRealTime(), prevSendTime = Clock.getRealTime(), prevUpdateNeighbours = Clock.getRealTime();
-
-        while (running) {
-            long currentTime = Clock.getRealTime();
-
-            if (currentTime - prevSendData > SEND_DATA_DELAY) {
-                prevSendData = currentTime;
-                sendDataToAll();
-            }
-
-            if (currentTime - prevSendTime > SEND_TIME_DELAY) {
-                prevSendTime = currentTime;
-                sendTime();
-            }
-
-            if (currentTime - prevUpdateNeighbours > UPDATE_NEIGHBOURS_DELAY) {
-                prevUpdateNeighbours = currentTime;
-                updateNeighbours();
-            }
-        }
-        /*
         new Thread(() -> {
-            Sleepyhead.sleep(3000);
-
             while (running) {
                 Sleepyhead.sleep(SEND_DATA_DELAY);
 
@@ -154,9 +126,11 @@ public class Client {
 
         new Thread(() -> {
             while (running) {
-                Sleepyhead.sleep(SEND_TIME_DELAY);
+                Sleepyhead.sleep(UPDATE_TIME_DELAY);
 
                 sendTime();
+
+                updateOtherClientsTimes();
             }
         }).start();
 
@@ -167,18 +141,6 @@ public class Client {
                 updateNeighbours();
             }
         }).start();
-        */
-    }
-
-    private static final SimpleDateFormat DATE_FORMAT = new SimpleDateFormat("yyyy.MM.dd HH:mm:ss");
-
-    private void showDebugInfo() {
-        System.out.println("\n"+
-                String.format("port=%d", localPort) + "\n" +
-                String.format("Work time=%d", getWorkTime()) + "\n" +
-                String.format("time=%s, timeV=%s", DATE_FORMAT.format(new Date(clock.getTime())), DATE_FORMAT.format(new Date(getTime()))) + "\n" +
-                "alpha=" + clock.getSkew() + " beta=" + clock.getOffset() + " alpha^=" + skew + " o^=" + offsetError + "\n" +
-                relativeSkew + "\n");
     }
 
     private synchronized void process(ClientAddress clientAddress, long clientTime, double clientSkew, double clientOffsetError, long localTime) {
@@ -186,28 +148,22 @@ public class Client {
             relativeSkew.put(clientAddress, 1D);
         }
 
-        long currentStage = (Clock.getRealTime() - startTime) / STAGE_TIME % 3;
-
         double currentRelativeSkew = relativeSkew.get(clientAddress);
 
-        if (/*currentStage == 0 &&*/ lastLocalTime.containsKey(clientAddress)) {
+        if (lastLocalTime.containsKey(clientAddress)) {
             long prevClientTime = lastClientTime.get(clientAddress);
             long prevLocalTime = lastLocalTime.get(clientAddress);
 
-            double newRelativeSkew = RELATIVE_SKEW_TUNE * currentRelativeSkew + (1 - RELATIVE_SKEW_TUNE) * (clientTime - prevClientTime) / (localTime - prevLocalTime);
-            relativeSkew.put(clientAddress, newRelativeSkew);
-        } else /*if (currentStage == 1)*/ {
-            skew = SKEW_TUNE * skew + (1 - SKEW_TUNE) * currentRelativeSkew * clientSkew;
-//        } else if (currentStage == 2){
-            offsetError = offsetError + (1 - OFFSET_ERROR_TUNE) * (clientSkew * clientTime + clientOffsetError - skew * localTime - offsetError);
+            currentRelativeSkew = RELATIVE_SKEW_TUNE * currentRelativeSkew + (1 - RELATIVE_SKEW_TUNE) * (clientTime - prevClientTime) / (localTime - prevLocalTime);
+
+            relativeSkew.put(clientAddress, currentRelativeSkew);
         }
+
+        skew = SKEW_TUNE * skew + (1 - SKEW_TUNE) * currentRelativeSkew * clientSkew;
+        offsetError = offsetError + (1 - OFFSET_ERROR_TUNE) * (clientSkew * clientTime + clientOffsetError - skew * localTime - offsetError);
 
         lastClientTime.put(clientAddress, clientTime);
         lastLocalTime.put(clientAddress, localTime);
-    }
-
-    private long getWorkTime() {
-        return Clock.getRealTime() - startTime;
     }
 
     private void register() throws IOException {
@@ -250,7 +206,6 @@ public class Client {
                 }
             }
 
-            // TODO: handle removed neighbours
 //            LOG.info("Got new neighbours: {}", newNeighbours);
         } catch (IOException e) {
             LOG.error("Failed to update neighbours.", e);
@@ -258,6 +213,7 @@ public class Client {
     }
 
     private void sendTime() {
+//        LOG.info("Sending time info to server..."); \u000a offsetError = debugOffset;
         try (Socket socket = new Socket(serverHostname, serverPort);
              DataOutputStream serverInput = new DataOutputStream(socket.getOutputStream())) {
 
@@ -265,8 +221,7 @@ public class Client {
 
             serverInput.writeInt(Request.SEND_TIME);
 
-            TimeInfo timeInfo = new TimeInfo(skew * clock.getSkew(), skew * clock.getOffset() + offsetError);
-            System.out.println(DATE_FORMAT.format(new Date(timeInfo.getTime())));
+            TimeInfo timeInfo = new TimeInfo(clock.getSkew(), clock.getOffset() + offsetError);
 
             serverInput.writeDouble(timeInfo.getSkew());
             serverInput.writeDouble(timeInfo.getOffset());
@@ -277,16 +232,37 @@ public class Client {
         }
     }
 
-    private ClientAddress chooseNeighbour() {
-        synchronized (neighbours) {
-            int count = neighbours.size();
+    private void updateOtherClientsTimes() {
+        try (Socket socket = new Socket(serverHostname, serverPort);
+             DataOutputStream serverInput = new DataOutputStream(socket.getOutputStream());
+             DataInputStream serverOutput = new DataInputStream(socket.getInputStream())) {
 
-            if (count == 0) {
-                return null;
+            serverInput.writeInt(localPort);
+
+            serverInput.writeInt(Request.UPDATE_CLIENTS_TIMES);
+
+            int count = serverOutput.readInt();
+
+            Map<ClientAddress, TimeInfo> newClientsTimes = new TreeMap<>();
+
+            while (count --> 0) {
+                String ip = serverOutput.readUTF();
+                int port = serverOutput.readInt();
+
+                double clientSkew = serverOutput.readDouble();
+                double clientOffset = serverOutput.readDouble();
+
+                newClientsTimes.put(new ClientAddress(ip, port), new TimeInfo(clientSkew, clientOffset));
             }
 
-            return neighbours.get(RANDOM.nextInt(count));
+            clientTimes = newClientsTimes;
+        } catch (IOException e) {
+            LOG.error("Failed to update clients times.", e);
         }
+    }
+
+    public Map<ClientAddress, TimeInfo> getOtherClientsTimes() {
+        return clientTimes;
     }
 
     private void sendDataToAll() {
@@ -298,6 +274,8 @@ public class Client {
     private void sendData(ClientAddress neighbour) {
         try (DatagramSocket socket = new DatagramSocket()) {
             SyncInfo syncInfo;
+
+//            LOG.info("Sending data to {}.", neighbour); \u000a offsetError = debugOffset;
 
             synchronized (this) {
                 syncInfo = new SyncInfo(localPort, clock.getTime(), skew, offsetError);
@@ -311,13 +289,22 @@ public class Client {
         } catch (IOException e) {
             LOG.error("Failed to send sync info to {}.", neighbour, e);
         }
+
     }
 
     public void disconnect() {
         running = false;
     }
 
-    public long getTime() {
-        return (long) (skew * clock.getTime() + offsetError);
+    public boolean isRunning() {
+        return running;
+    }
+
+    public TimeInfo getEstimateTime() {
+        return new TimeInfo(clock.getSkew(), clock.getOffset() + debugOffset);
+    }
+
+    public TimeInfo getRealTime() {
+        return new TimeInfo(clock.getSkew(), clock.getOffset());
     }
 }

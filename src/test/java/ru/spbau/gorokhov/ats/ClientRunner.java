@@ -1,4 +1,4 @@
-package ru.spbau.gorokhov.ats.utils;
+package ru.spbau.gorokhov.ats;
 
 import ru.spbau.gorokhov.ats.client.Client;
 

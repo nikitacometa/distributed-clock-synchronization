@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import ru.spbau.gorokhov.ats.client.utils.Clock;
+import ru.spbau.gorokhov.ats.client.utils.RandomUtils;
 import ru.spbau.gorokhov.ats.model.ClientAddress;
 import ru.spbau.gorokhov.ats.model.Request;
 import ru.spbau.gorokhov.ats.model.TimeInfo;
@@ -11,7 +12,6 @@ import ru.spbau.gorokhov.ats.utils.Sleepyhead;
 
 import java.io.*;
 import java.net.*;
-import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -21,11 +21,13 @@ public class Server {
 
     private static final int DEFAULT_PORT = 8080;
 
-    private static final int SHOW_TIME_DELAY = 2000;
+    private static final int SHOW_TIME_DELAY = 1000;
 
     private final int port;
 
     private final List<ClientAddress> clients = new ArrayList<>();
+
+    private final Map<ClientAddress, List<ClientAddress>> clientNeighbours = new TreeMap<>();
 
     private final Map<ClientAddress, TimeInfo> clientTimes = new TreeMap<>();
 
@@ -59,27 +61,39 @@ public class Server {
             }
         }).start();
 
-//        while (running) {
-//            Sleepyhead.sleep(SHOW_TIME_DELAY);
-//
-//            showTime();
-//        }
-    }
+        while (running) {
+            Sleepyhead.sleep(SHOW_TIME_DELAY);
 
-    private static final SimpleDateFormat DATE_FORMAT = new SimpleDateFormat("yyyy.MM.dd HH:mm:ss");
+            showTime();
+        }
+    }
 
     private void showTime() {
         System.out.println("Working for " + (Clock.getRealTime() - startTime) + "ms. Clients:");
         synchronized (clientTimes) {
-            clientTimes.forEach((address, timeInfo) -> System.out.println(address + ": " + DATE_FORMAT.format(new Date(timeInfo.getTime()))));
+            clientTimes.forEach((address, timeInfo) -> System.out.println(address + ": " + timeInfo));
         }
     }
 
+    private int getNumberOfOneClientNeighbours() {
+        return clients.size() / 2;
+    }
+
     private List<ClientAddress> getNeighbours(ClientAddress clientAddress) {
-        // TODO something smarter
-        synchronized (clients) {
-            return clients.stream().filter(s -> !s.equals(clientAddress)).collect(Collectors.toList());
-        }
+        return clientNeighbours.get(clientAddress);
+    }
+
+    private synchronized void updateNeighbours(ClientAddress clientAddress) {
+        List<ClientAddress> neighbours = clients.stream()
+                .filter(client -> RandomUtils.nextBoolean())
+                .collect(Collectors.toList());
+        clientNeighbours.put(clientAddress, neighbours);
+
+        clients.stream()
+                .filter(c -> RandomUtils.nextBoolean())
+                .forEach(client -> clientNeighbours.get(client).add(clientAddress));
+
+        clients.add(clientAddress);
     }
 
     @RequiredArgsConstructor
@@ -102,9 +116,8 @@ public class Server {
 
                 switch (requestId) {
                     case Request.REGISTER:
-                        synchronized (clients) {
-                            clients.add(clientAddress);
-                        }
+                        updateNeighbours(clientAddress);
+
 //                        LOG.info("Client {} was registered.", clientAddress);
                         break;
 
@@ -134,6 +147,26 @@ public class Server {
                             LOG.error("Failed to send neighbours.", e);
                         }
                         break;
+
+                    case Request.UPDATE_CLIENTS_TIMES:
+                        synchronized (clientTimes) {
+                            clientInput.writeInt(clientTimes.size() - 1);
+
+                            for (Map.Entry<ClientAddress, TimeInfo> entry : clientTimes.entrySet()) {
+                                ClientAddress address = entry.getKey();
+                                TimeInfo info = entry.getValue();
+                                if (!address.equals(clientAddress)) {
+                                    clientInput.writeUTF(address.getIp());
+                                    clientInput.writeInt(address.getPort());
+                                    clientInput.writeDouble(info.getSkew());
+                                    clientInput.writeDouble(info.getOffset());
+                                }
+                            }
+                        }
+                        break;
+
+                    default:
+                        LOG.error("Unknown request: {}.", requestId);
 
                 }
             } catch (IOException e) {

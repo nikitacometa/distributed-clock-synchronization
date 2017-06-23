@@ -3,10 +3,7 @@ package ru.spbau.gorokhov.ats.client;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import ru.spbau.gorokhov.ats.client.utils.Clock;
-import ru.spbau.gorokhov.ats.model.ClientAddress;
-import ru.spbau.gorokhov.ats.model.Request;
-import ru.spbau.gorokhov.ats.model.SyncInfo;
-import ru.spbau.gorokhov.ats.model.TimeInfo;
+import ru.spbau.gorokhov.ats.model.*;
 import ru.spbau.gorokhov.ats.utils.Serializer;
 import ru.spbau.gorokhov.ats.utils.Sleepyhead;
 
@@ -44,7 +41,7 @@ public class Client {
 
     private long startWork;
 
-    private volatile Map<ClientAddress, TimeInfo> clientTimes = new TreeMap<>();
+    private volatile List<ClientTimeInfo> clientTimes;
 
     private final List<ClientAddress> neighbours = new ArrayList<>();
 
@@ -227,6 +224,10 @@ public class Client {
 
             serverInput.writeInt(Request.SEND_TIME);
 
+            serverInput.writeDouble(clock.getSkew());
+            serverInput.writeDouble(clock.getOffset());
+
+
             TimeInfo timeInfo = getEstimateTime();
 
             serverInput.writeDouble(timeInfo.getSkew());
@@ -249,25 +250,29 @@ public class Client {
 
             int count = serverOutput.readInt();
 
-            Map<ClientAddress, TimeInfo> newClientsTimes = new TreeMap<>();
+            List<ClientTimeInfo> newClientTimes = new ArrayList<>();
 
             while (count --> 0) {
                 String ip = serverOutput.readUTF();
                 int port = serverOutput.readInt();
 
-                double clientSkew = serverOutput.readDouble();
-                double clientOffset = serverOutput.readDouble();
+                double clientRealSkew = serverOutput.readDouble();
+                double clientRealOffset = serverOutput.readDouble();
 
-                newClientsTimes.put(new ClientAddress(ip, port), new TimeInfo(clientSkew, clientOffset));
+                double clientEstimateSkew = serverOutput.readDouble();
+                double clientEstimateOffset = serverOutput.readDouble();
+
+                newClientTimes.add(new ClientTimeInfo(new ClientAddress(ip, port),
+                        new TimeInfo(clientRealSkew, clientRealOffset), new TimeInfo(clientEstimateSkew, clientEstimateOffset)));
             }
 
-            clientTimes = newClientsTimes;
+            clientTimes = newClientTimes;
         } catch (IOException e) {
             LOG.error("Failed to update clients times.", e);
         }
     }
 
-    public Map<ClientAddress, TimeInfo> getOtherClientsTimes() {
+    public List<ClientTimeInfo> getOtherClientsTimes() {
         return clientTimes;
     }
 
@@ -306,5 +311,17 @@ public class Client {
 
     public TimeInfo getRealTime() {
         return new TimeInfo(clock.getSkew(), clock.getOffset());
+    }
+
+    public String getIp() {
+        try {
+            return InetAddress.getLocalHost().getHostName();
+        } catch (UnknownHostException ignored) {
+            return null;
+        }
+    }
+
+    public int getPort() {
+        return localPort;
     }
 }

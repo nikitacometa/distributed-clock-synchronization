@@ -3,11 +3,9 @@ package ru.spbau.gorokhov.ats.server;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import ru.spbau.gorokhov.ats.client.utils.Clock;
 import ru.spbau.gorokhov.ats.model.ClientAddress;
 import ru.spbau.gorokhov.ats.model.Request;
 import ru.spbau.gorokhov.ats.model.TimeInfo;
-import ru.spbau.gorokhov.ats.utils.Sleepyhead;
 
 import java.io.*;
 import java.net.*;
@@ -58,23 +56,12 @@ public class Server {
                 LOG.error("Server crushed.", e);
             }
         }).start();
-
-//        while (running) {
-//            Sleepyhead.sleep(SHOW_TIME_DELAY);
-//
-//            showTime();
-//        }
     }
 
-//    private void showTime() {
-//        System.out.println("Working for " + (Clock.getRealTime() - startTime) + "ms. Clients:");
-//        synchronized (clientEstimateTimes) {
-//            clientEstimateTimes.forEach((address, timeInfo) -> System.out.println(address + ": " + timeInfo));
-//        }
-//    }
+    private static final int MAX_NEIGHBOURS = 4;
 
     private int getNumberOfOneClientNeighbours() {
-        return Math.min(clients.size(), 3);
+        return Math.min(clients.size(), MAX_NEIGHBOURS);
     }
 
     private List<ClientAddress> getNeighbours(ClientAddress clientAddress) {
@@ -117,14 +104,21 @@ public class Server {
                         break;
 
                     case Request.SEND_TIME:
-                        double clientSkew = clientOutput.readDouble();
-                        double clientOffset = clientOutput.readDouble();
-                        TimeInfo timeInfo = new TimeInfo(clientSkew, clientOffset);
+                        double clientRealSkew = clientOutput.readDouble();
+                        double clientRealOffset = clientOutput.readDouble();
+                        TimeInfo realTime = new TimeInfo(clientRealSkew, clientRealOffset);
 
-                        LOG.info("Got time info from {}: {}", clientAddress, timeInfo);
+                        double clientEstimateSkew = clientOutput.readDouble();
+                        double clientEstimateOffset = clientOutput.readDouble();
+                        TimeInfo estimateTime = new TimeInfo(clientEstimateSkew, clientEstimateOffset);
 
+                        LOG.info("Got time info from {}: {}, {}", clientAddress, realTime, estimateTime);
+
+                        synchronized (clientRealTimes) {
+                            clientRealTimes.put(clientAddress, realTime);
+                        }
                         synchronized (clientEstimateTimes) {
-                            clientEstimateTimes.put(clientAddress, timeInfo);
+                            clientEstimateTimes.put(clientAddress, estimateTime);
                         }
                         break;
 
@@ -144,17 +138,19 @@ public class Server {
                         break;
 
                     case Request.UPDATE_CLIENTS_TIMES:
-                        synchronized (clientEstimateTimes) {
-                            clientInput.writeInt(clientEstimateTimes.size() - 1);
+                        synchronized (this) {
+                            clientInput.writeInt(clients.size() - 1);
 
-                            for (Map.Entry<ClientAddress, TimeInfo> entry : clientEstimateTimes.entrySet()) {
-                                ClientAddress address = entry.getKey();
-                                TimeInfo info = entry.getValue();
-                                if (!address.equals(clientAddress)) {
-                                    clientInput.writeUTF(address.getIp());
-                                    clientInput.writeInt(address.getPort());
-                                    clientInput.writeDouble(info.getSkew());
-                                    clientInput.writeDouble(info.getOffset());
+                            for (ClientAddress client : clients) {
+                                if (!client.equals(clientAddress)) {
+                                    TimeInfo realTimeInfo = clientRealTimes.get(client);
+                                    TimeInfo estimateTimeInfo = clientEstimateTimes.get(client);
+                                    clientInput.writeUTF(client.getIp());
+                                    clientInput.writeInt(client.getPort());
+                                    clientInput.writeDouble(realTimeInfo.getSkew());
+                                    clientInput.writeDouble(realTimeInfo.getOffset());
+                                    clientInput.writeDouble(estimateTimeInfo.getSkew());
+                                    clientInput.writeDouble(estimateTimeInfo.getOffset());
                                 }
                             }
                         }

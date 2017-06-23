@@ -4,8 +4,8 @@ import lombok.Getter;
 
 @Getter
 public class Clock {
-    private static final long MAX_SKEW_DEVIATION = (long) 1000 * 60 * 60 * 24; // one year
-    private static final long MAX_OFFSET_DEVIATION = (long) 1000 * 60 * 60 * 24;
+    private static final long MAX_SKEW_DEVIATION = (long) 1000 * 60 * 60 * 24 * 365 * 30; // thirty years
+    private static final long MAX_OFFSET_DEVIATION = (long) 1000 * 60 * 60 * 24 * 365 * 30;
 
     private final double skew;
     private final double offset;

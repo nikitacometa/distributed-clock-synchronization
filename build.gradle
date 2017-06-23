@@ -16,3 +16,14 @@ dependencies {
 
     testCompile group: 'junit', name: 'junit', version: '4.12'
 }
+
+task fatJar(type: Jar) {
+    manifest {
+        attributes 'Implementation-Title': 'ATS Client',
+                'Implementation-Version': version,
+                'Main-Class': 'ru.spbau.gorokhov.ats.client.gui.ClientApp'
+    }
+    baseName = project.name + '-all'
+    from { configurations.compile.collect { it.isDirectory() ? it : zipTree(it) } }
+    with jar
+}

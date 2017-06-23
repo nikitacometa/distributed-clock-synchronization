@@ -4,7 +4,6 @@ import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import ru.spbau.gorokhov.ats.client.utils.Clock;
-import ru.spbau.gorokhov.ats.client.utils.RandomUtils;
 import ru.spbau.gorokhov.ats.model.ClientAddress;
 import ru.spbau.gorokhov.ats.model.Request;
 import ru.spbau.gorokhov.ats.model.TimeInfo;
@@ -29,11 +28,10 @@ public class Server {
 
     private final Map<ClientAddress, List<ClientAddress>> clientNeighbours = new TreeMap<>();
 
-    private final Map<ClientAddress, TimeInfo> clientTimes = new TreeMap<>();
+    private final Map<ClientAddress, TimeInfo> clientEstimateTimes = new TreeMap<>();
+    private final Map<ClientAddress, TimeInfo> clientRealTimes = new TreeMap<>();
 
     private boolean running = false;
-
-    private long startTime = Clock.getRealTime();
 
     public Server(int port) {
         this.port = port;
@@ -61,22 +59,22 @@ public class Server {
             }
         }).start();
 
-        while (running) {
-            Sleepyhead.sleep(SHOW_TIME_DELAY);
-
-            showTime();
-        }
+//        while (running) {
+//            Sleepyhead.sleep(SHOW_TIME_DELAY);
+//
+//            showTime();
+//        }
     }
 
-    private void showTime() {
-        System.out.println("Working for " + (Clock.getRealTime() - startTime) + "ms. Clients:");
-        synchronized (clientTimes) {
-            clientTimes.forEach((address, timeInfo) -> System.out.println(address + ": " + timeInfo));
-        }
-    }
+//    private void showTime() {
+//        System.out.println("Working for " + (Clock.getRealTime() - startTime) + "ms. Clients:");
+//        synchronized (clientEstimateTimes) {
+//            clientEstimateTimes.forEach((address, timeInfo) -> System.out.println(address + ": " + timeInfo));
+//        }
+//    }
 
     private int getNumberOfOneClientNeighbours() {
-        return Math.min(clients.size(), 6);
+        return Math.min(clients.size(), 3);
     }
 
     private List<ClientAddress> getNeighbours(ClientAddress clientAddress) {
@@ -85,7 +83,7 @@ public class Server {
 
     private synchronized void updateNeighbours(ClientAddress newClientAddress) {
         List<ClientAddress> neighbours = clients.stream()
-                .sorted(Comparator.comparingInt(client -> clientNeighbours.get(client).size()).reversed())
+                .sorted(Comparator.comparingInt(client -> clientNeighbours.get(client).size()))
                 .limit(getNumberOfOneClientNeighbours())
                 .collect(Collectors.toList());
         neighbours.forEach(neighbour -> clientNeighbours.get(neighbour).add(newClientAddress));
@@ -109,13 +107,13 @@ public class Server {
 
                 int requestId = clientOutput.readInt();
 
-//                LOG.info("{} request from {}", Request.toString(requestId), clientAddress);
+                LOG.info("{} request from {}", requestId, clientAddress);
 
                 switch (requestId) {
                     case Request.REGISTER:
                         updateNeighbours(clientAddress);
 
-//                        LOG.info("Client {} was registered.", clientAddress);
+                        LOG.info("Client {} was registered.", clientAddress);
                         break;
 
                     case Request.SEND_TIME:
@@ -123,10 +121,10 @@ public class Server {
                         double clientOffset = clientOutput.readDouble();
                         TimeInfo timeInfo = new TimeInfo(clientSkew, clientOffset);
 
-//                        LOG.info("Got time info from {}: {}", clientAddress, timeInfo);
+                        LOG.info("Got time info from {}: {}", clientAddress, timeInfo);
 
-                        synchronized (clientTimes) {
-                            clientTimes.put(clientAddress, timeInfo);
+                        synchronized (clientEstimateTimes) {
+                            clientEstimateTimes.put(clientAddress, timeInfo);
                         }
                         break;
 
@@ -139,17 +137,17 @@ public class Server {
                                 clientInput.writeInt(neighbour.getPort());
                             }
 
-//                            LOG.info("Neighbours were sent to {}: {}", clientAddress, neighbours);
+                            LOG.info("Neighbours were sent to {}: {}", clientAddress, neighbours);
                         } catch (IOException e) {
                             LOG.error("Failed to send neighbours.", e);
                         }
                         break;
 
                     case Request.UPDATE_CLIENTS_TIMES:
-                        synchronized (clientTimes) {
-                            clientInput.writeInt(clientTimes.size() - 1);
+                        synchronized (clientEstimateTimes) {
+                            clientInput.writeInt(clientEstimateTimes.size() - 1);
 
-                            for (Map.Entry<ClientAddress, TimeInfo> entry : clientTimes.entrySet()) {
+                            for (Map.Entry<ClientAddress, TimeInfo> entry : clientEstimateTimes.entrySet()) {
                                 ClientAddress address = entry.getKey();
                                 TimeInfo info = entry.getValue();
                                 if (!address.equals(clientAddress)) {

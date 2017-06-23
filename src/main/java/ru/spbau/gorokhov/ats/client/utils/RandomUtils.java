@@ -13,12 +13,4 @@ public class RandomUtils {
     public static long nextLong(long from, long to) {
         return from + nextLong(to - from + 1);
     }
-
-    public static boolean nextBoolean() {
-        return RANDOM.nextBoolean();
-    }
-
-    public static boolean trueWithProbability(double probability) {
-        return RANDOM.nextDouble() < probability;
-    }
 }

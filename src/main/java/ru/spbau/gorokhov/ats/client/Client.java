@@ -111,7 +111,7 @@ public class Client {
 
                     ClientAddress clientAddress = new ClientAddress(packet.getAddress().getHostAddress(), syncInfo.getPort());
 
-//                    LOG.info("Got sync info from {}: {}", clientAddress, syncInfo);
+                    LOG.info("Got sync info from {}: {}", clientAddress, syncInfo);
 
                     process(clientAddress, syncInfo.getTime(), syncInfo.getSkew(), syncInfo.getOffset(), localTime);
                 }
@@ -213,14 +213,13 @@ public class Client {
                 }
             }
 
-//            LOG.info("Got new neighbours: {}", newNeighbours);
+            LOG.info("Got new neighbours: {}", newNeighbours);
         } catch (IOException e) {
             LOG.error("Failed to update neighbours.", e);
         }
     }
 
     private void sendTime() {
-//        LOG.info("Sending time info to server..."); offsetError = debugOffset;
         try (Socket socket = new Socket(serverHostname, serverPort);
              DataOutputStream serverInput = new DataOutputStream(socket.getOutputStream())) {
 
@@ -233,7 +232,7 @@ public class Client {
             serverInput.writeDouble(timeInfo.getSkew());
             serverInput.writeDouble(timeInfo.getOffset());
 
-//            LOG.info("Time info was sent: {}", timeInfo);
+            LOG.info("Time info was sent: {}", timeInfo);
         } catch (IOException e) {
             LOG.error("Failed to send time info.", e);
         }
@@ -282,8 +281,6 @@ public class Client {
         try (DatagramSocket socket = new DatagramSocket()) {
             SyncInfo syncInfo;
 
-//            LOG.info("Sending data to {}.", neighbour); offsetError = debugOffset;
-
             synchronized (this) {
                 syncInfo = new SyncInfo(localPort, clock.getTime(), skew, offsetError);
             }
@@ -292,7 +289,7 @@ public class Client {
             DatagramPacket packet = new DatagramPacket(data, data.length, InetAddress.getByName(neighbour.getIp()), neighbour.getPort());
             socket.send(packet);
 
-//            LOG.info("Sync info was sent to {}: {}", neighbour, syncInfo);
+            LOG.info("Sync info was sent to {}: {}", neighbour, syncInfo);
         } catch (IOException e) {
             LOG.error("Failed to send sync info to {}.", neighbour, e);
         }
@@ -301,10 +298,6 @@ public class Client {
 
     public void disconnect() {
         running = false;
-    }
-
-    public boolean isRunning() {
-        return running;
     }
 
     public TimeInfo getEstimateTime() {
